@@ -120,7 +120,7 @@ uint16_t BMS_CapacityAh=0;
 uint16_t BMS_CapacityWhCharge=0;
 long BMS_PackVolt=0;
 float BMS_AvgTemp=0;
-uint16_t BMS_BatAmp=0;
+long BMS_BatAmp=0;
 
 //Drive
 const uint16_t canID_Drive = 0x100; 
@@ -172,6 +172,14 @@ bool ElconDCDC_msgInvalid=false;
 
 // LIM
 uint8_t LIM_ACSE_I_Avbl_Grid;                  // E 3B4h Maximum AC current network up to 252A in 1A steps
+uint16_t LIM_DCSE_I_Avbl;                    // E 29Eh Available current up to 255A in 0.1A steps
+uint8_t LIM_Charger_Type;                       // E 3B4h Current charging type 0=no charging, 1=AC-Typ1, 2=AC-Typ2, 3=DC-Cahdemo, 4=DC-Typ1, 5=AC-CN, 6=AC-Combo1, 7=AC-Combo2, 8= DC-Typ2 9=DC-Combo2, A=DC-GB_T
+uint16_t LIM_DCSE_I_Current;                       // E 2B2h Current current from DC EVSE up to 255A in 0.1A steps
+uint16_t LIM_DCSE_V_Current;                       // E 2B2h Current voltage from DC EVSE to 600V in 0.1V steps
+uint16_t LIM_DCSE_Rst_Tme_Chg;                 // E 2B2h Remaining charging time of DC EVSE in seconds
+uint8_t LIM_DCSE_Rst_Tme_Chg_secs=0;
+uint8_t LIM_DCSE_Rst_Tme_Chg_mins=0;
+uint8_t LIM_DCSE_Rst_Tme_Chg_hrs=0;
 uint8_t  ctr_mins_EOC=0;                           // End of Charge timer: Remaining charging time for the display in minutes
 uint8_t  ctr_hrs_EOC=0;                           // End of Charge timer: Remaining charging time for the display in minutes
 
@@ -350,7 +358,12 @@ void Set_ZeroElcon(void)
   }
 void Set_ZeroLIM(void)
   {         
-    LIM_ACSE_I_Avbl_Grid=0xFF;                         
+    LIM_ACSE_I_Avbl_Grid=0xFF;     
+    LIM_DCSE_I_Avbl=0xFFFF;
+    LIM_Charger_Type=0xFF;                
+    LIM_DCSE_I_Current=0xFFFF;
+    LIM_DCSE_V_Current=0xFFFF;
+    LIM_DCSE_Rst_Tme_Chg=0xFFFF;
   }
 void Set_ZeroIBooster(void)
 {
@@ -504,7 +517,7 @@ void Check_BMS (CAN_message_t incoming)
       case canID_BMSStatus:
         {    
           uint16_t readingBMS_PackVoltage = 0; 
-          long readingBMS_Current = 0; 
+          uint16_t readingBMS_Current = 0; 
           float readingBMS_AvgTemp = 0; 
 
           readingBMS_PackVoltage = (uint16_t)((incoming.buf[1] << 8) | (incoming.buf[0]));
@@ -514,8 +527,8 @@ void Check_BMS (CAN_message_t incoming)
           readingBMS_Current = (long)((incoming.buf[3] << 8) | (incoming.buf[2]));
           // readingBMS_Current=readingBMS_Current/100; //miliamps to amps in 0.1A steps
           // readingBMS_Current=8192-readingBMS_Current;
-          if (readingBMS_Current > 0) BMS_BatAmp=(uint16_t)readingBMS_Current;
-          else BMS_BatAmp = 0;
+          BMS_BatAmp=(long)readingBMS_Current;
+          if (readingBMS_Current > 0x7ffffff) BMS_BatAmp=-BMS_BatAmp;
 
           readingBMS_AvgTemp = (float)((incoming.buf[5] << 8) | (incoming.buf[4]));
           BMS_AvgTemp=readingBMS_AvgTemp;
@@ -724,7 +737,25 @@ void Check_LIM(CAN_message_t incoming)
     switch (incoming.id)
       {
         case 0x3B4:    
-          LIM_ACSE_I_Avbl_Grid = incoming.buf[0];          
+          LIM_ACSE_I_Avbl_Grid = incoming.buf[0];    
+          LIM_Charger_Type = incoming.buf[6];      
+        break;
+        case 0x2B2:
+          {    
+            uint16_t LIM_DCSE_Rst_Tme_Chg_temp=0;
+            LIM_DCSE_Rst_Tme_Chg = (uint16_t)((incoming.buf[7] << 8) | (incoming.buf[6]));
+            LIM_DCSE_Rst_Tme_Chg_temp=LIM_DCSE_Rst_Tme_Chg;
+            //seconds to hh:mm:ss
+            LIM_DCSE_Rst_Tme_Chg_secs=LIM_DCSE_Rst_Tme_Chg_temp % 60;
+            LIM_DCSE_Rst_Tme_Chg_temp = (LIM_DCSE_Rst_Tme_Chg_temp - LIM_DCSE_Rst_Tme_Chg_secs)/60;
+            LIM_DCSE_Rst_Tme_Chg_mins = LIM_DCSE_Rst_Tme_Chg_temp % 60;
+            LIM_DCSE_Rst_Tme_Chg_temp = (LIM_DCSE_Rst_Tme_Chg_temp - LIM_DCSE_Rst_Tme_Chg_mins)/60;
+            LIM_DCSE_Rst_Tme_Chg_hrs=LIM_DCSE_Rst_Tme_Chg_temp;
+            LIM_DCSE_I_Current = (uint16_t)((incoming.buf[3] << 8) | (incoming.buf[2]));
+            LIM_DCSE_V_Current = (uint16_t)((incoming.buf[1] << 8) | (incoming.buf[0]));
+          }
+        case 0x29E:    
+          LIM_DCSE_I_Avbl = (uint16_t)((incoming.buf[4] << 8) | (incoming.buf[3]));
         break;
       }
     LIM_watchdog=millis();
@@ -1154,8 +1185,8 @@ void dashupdate()
       Serial2.write(0xff);
       Serial2.write(0xff);
       //colourcode motor temp
-      if(Drive_MotorTemp<=4000) Serial2.print("m_temp.pco=2016"); //text colour = green
-      else if (Drive_MotorTemp>4000 && Drive_MotorTemp<=7000) Serial2.print("m_temp.pco=65504"); //text colour = yellow
+      if(Drive_MotorTemp<=6000) Serial2.print("m_temp.pco=2016"); //text colour = green
+      else if (Drive_MotorTemp>6000 && Drive_MotorTemp<=7000) Serial2.print("m_temp.pco=65504"); //text colour = yellow
       else Serial2.print("m_temp.pco=63488"); //text colour = red
       Serial2.write(0xff);  // We always have to send this three lines after each command sent to the nextion display.
       Serial2.write(0xff);
@@ -1230,7 +1261,7 @@ void dashupdate()
       // // Serial2.write(0xff);
       Serial2.print("volt_delta.txt=");
       Serial2.write(0x22);
-      Serial2.print((float) ((BMS_CellsVoltMax - BMS_CellsVoltMin) / 1.0),2);
+      Serial2.print((float) ((BMS_CellsVoltMax - BMS_CellsVoltMin) / 1.0),0);
       Serial2.write(0x22);
       Serial2.write(0xff);  // We always have to send this three lines after each command sent to the nextion display.
       Serial2.write(0xff);
@@ -1251,14 +1282,14 @@ void dashupdate()
       Serial2.write(0xff);
       Serial2.print("mph.txt=");
       Serial2.write(0x22);
-      Serial2.print((uint16_t) (Drive_RPM/48.4/2));
+      Serial2.print((uint16_t) (Drive_RPM/120.24));
       Serial2.write(0x22);
       Serial2.write(0xff);  // We always have to send this three lines after each command sent to the nextion display.
       Serial2.write(0xff);
       Serial2.write(0xff);
       Serial2.print("kmph.txt=");
       Serial2.write(0x22);
-      Serial2.print((uint16_t) (Drive_RPM/30.0/2));
+      Serial2.print((uint16_t) (Drive_RPM/74.68));
       Serial2.write(0x22);
       Serial2.write(0xff);  // We always have to send this three lines after each command sent to the nextion display.
       Serial2.write(0xff);
@@ -1460,75 +1491,148 @@ void dashupdate()
       Serial2.write(0xff);
       Serial2.write(0xff);
 
-      Serial2.print ("charger_error.txt=");
-      Serial2.write(0x22);
-      if (ElconCharger_msgInvalid)
+      if (LIM_Charger_Type==0x04 || LIM_Charger_Type==0x08 || LIM_Charger_Type==0x09) //DC Charging info
         {
-          Serial2.print ("Invalid CAN message");
-        }
-      else
-        {
-          if (ElconCharger_CommTimeout==1)                     Serial2.print ("CommTimeout;");
-          if (ElconCharger_HardwareError==1)                     Serial2.print ("HardwareError;");      
-          if (ElconCharger_TempError==1)                     Serial2.print ("OverTemp;");
-          if (ElconCharger_BatVoltError==1)                     Serial2.print ("BatteryVoltError;");
-          if (ElconCharger_InVoltError==1)                     Serial2.print ("InputVoltError;");
-          if (ElconCharger_CommTimeout==0 && ElconCharger_HardwareError==0 && ElconCharger_TempError==0 && ElconCharger_BatVoltError==0 && ElconCharger_InVoltError==0) 
-            {Serial2.print ("Ok");}
-        }
-      Serial2.write(0x22);
-      Serial2.write(0xff);  // We always have to send this three lines after each command sent to the nextion display.
-      Serial2.write(0xff);
-      Serial2.write(0xff);
+          Serial2.print ("charger_error.txt=");
+          Serial2.write(0x22);
+          Serial2.print ("TBD");
+          // if (ElconCharger_msgInvalid)
+          //   {
+          //     Serial2.print ("Invalid CAN message");
+          //   }
+          // else
+          //   {
+          //     if (ElconCharger_CommTimeout==1)                     Serial2.print ("CommTimeout;");
+          //     if (ElconCharger_HardwareError==1)                     Serial2.print ("HardwareError;");      
+          //     if (ElconCharger_TempError==1)                     Serial2.print ("OverTemp;");
+          //     if (ElconCharger_BatVoltError==1)                     Serial2.print ("BatteryVoltError;");
+          //     if (ElconCharger_InVoltError==1)                     Serial2.print ("InputVoltError;");
+          //     if (ElconCharger_CommTimeout==0 && ElconCharger_HardwareError==0 && ElconCharger_TempError==0 && ElconCharger_BatVoltError==0 && ElconCharger_InVoltError==0) 
+          //       {Serial2.print ("Ok");}
+          //   }
+          Serial2.write(0x22);
+          Serial2.write(0xff);  // We always have to send this three lines after each command sent to the nextion display.
+          Serial2.write(0xff);
+          Serial2.write(0xff);
 
-      Serial2.print ("charger_stat.txt=");
-      Serial2.write(0x22);
-      if (ElconCharger_msgInvalid)
-        {
-          Serial2.print ("Invalid CAN message");
-        }
-      else
-        {
-          // if (ElconCharger_Sts==1)       Serial2.print ("ON ");
-          // else if (ElconCharger_Sts==0)  Serial2.print ("OFF ");
-          Serial2.print ("DC:");
-          Serial2.print ((float) (ElconCharger_VoltOutput/10.0),1);
-          Serial2.print ("V");
-          Serial2.print ((float) (ElconCharger_AmpOutput/10.0),1);
-          Serial2.print ("A AC:");
-
-          Serial2.print ((float) (ElconCharger_AmpOutput*ElconCharger_CurrentConst/10.0),0);
-          Serial2.print ("/");
-          if (BMS_State==BMS_Charge && LIM_ACSE_I_Avbl_Grid < 253) Serial2.print (LIM_ACSE_I_Avbl_Grid);
+          Serial2.print ("charger_stat.txt=");
+          Serial2.write(0x22);
+          if (LIM_Charger_Type == 4) Serial2.print ("CCS1: ");
+          else if (LIM_Charger_Type == 8) Serial2.print ("CCS1C: ");
+          else if (LIM_Charger_Type == 9) Serial2.print ("CCS2C: ");
+          else Serial2.print ("DC???: ");
+          Serial2.print ((float) (LIM_DCSE_V_Current/10.0),1);
+          Serial2.print ("V ");
+          Serial2.print ((float) (LIM_DCSE_I_Current/10.0),1);
+          Serial2.print (" / ");
+          if (BMS_State==BMS_Charge && LIM_DCSE_I_Avbl < 2550) Serial2.print ((float) (LIM_DCSE_I_Avbl/10.0),1);
           else Serial2.print ("0");
           Serial2.print ("A");
-        }
-      Serial2.write(0x22);
-      Serial2.write(0xff);  // We always have to send this three lines after each command sent to the nextion display.
-      Serial2.write(0xff);
-      Serial2.write(0xff);
+          Serial2.write(0x22);
+          Serial2.write(0xff);  // We always have to send this three lines after each command sent to the nextion display.
+          Serial2.write(0xff);
+          Serial2.write(0xff);
 
-      Serial2.print ("charger_time.txt=");
-      Serial2.write(0x22);
-      if (BMS_State==BMS_Charge)
-        {
-          if(ctr_hrs_EOC>0)
+          Serial2.print ("charger_time.txt=");
+          Serial2.write(0x22);
+          if (BMS_State==BMS_Charge)
             {
-              Serial2.print (ctr_hrs_EOC);
-              Serial2.print ("hrs ");
-            }
-          Serial2.print (ctr_mins_EOC);
-          Serial2.print ("mins to complete");
-        }
-      else
-        {
-          Serial2.print ("");
-        }
-      Serial2.write(0x22);
-      Serial2.write(0xff);  // We always have to send this three lines after each command sent to the nextion display.
-      Serial2.write(0xff);
-      Serial2.write(0xff);
 
+              if (LIM_DCSE_Rst_Tme_Chg_hrs<=0 && LIM_DCSE_Rst_Tme_Chg_mins<=0)
+                {
+                  Serial2.print ("less than a minute to complete");  
+                }
+              else
+                {
+                  if(LIM_DCSE_Rst_Tme_Chg_hrs>0)
+                    {
+                      Serial2.print (LIM_DCSE_Rst_Tme_Chg_hrs);
+                      Serial2.print ("hrs ");
+                    }
+                  Serial2.print (LIM_DCSE_Rst_Tme_Chg_mins);
+                  Serial2.print ("mins to complete");                 
+                }
+            }
+          else
+            {
+              Serial2.print ("");
+            }
+          Serial2.write(0x22);
+          Serial2.write(0xff);  // We always have to send this three lines after each command sent to the nextion display.
+          Serial2.write(0xff);
+          Serial2.write(0xff);
+        }
+      else //AC Charging info
+        {
+          Serial2.print ("charger_error.txt=");
+          Serial2.write(0x22);
+          if (ElconCharger_msgInvalid)
+            {
+              Serial2.print ("Invalid CAN message");
+            }
+          else
+            {
+              if (ElconCharger_CommTimeout==1)                     Serial2.print ("CommTimeout;");
+              if (ElconCharger_HardwareError==1)                     Serial2.print ("HardwareError;");      
+              if (ElconCharger_TempError==1)                     Serial2.print ("OverTemp;");
+              if (ElconCharger_BatVoltError==1)                     Serial2.print ("BatteryVoltError;");
+              if (ElconCharger_InVoltError==1)                     Serial2.print ("InputVoltError;");
+              if (ElconCharger_CommTimeout==0 && ElconCharger_HardwareError==0 && ElconCharger_TempError==0 && ElconCharger_BatVoltError==0 && ElconCharger_InVoltError==0) 
+                {Serial2.print ("Ok");}
+            }
+          Serial2.write(0x22);
+          Serial2.write(0xff);  // We always have to send this three lines after each command sent to the nextion display.
+          Serial2.write(0xff);
+          Serial2.write(0xff);
+
+          Serial2.print ("charger_stat.txt=");
+          Serial2.write(0x22);
+          if (ElconCharger_msgInvalid)
+            {
+              Serial2.print ("Invalid CAN message");
+            }
+          else
+            {
+              // if (ElconCharger_Sts==1)       Serial2.print ("ON ");
+              // else if (ElconCharger_Sts==0)  Serial2.print ("OFF ");
+              Serial2.print ("DC:");
+              Serial2.print ((float) (ElconCharger_VoltOutput/10.0),1);
+              Serial2.print ("V");
+              Serial2.print ((float) (ElconCharger_AmpOutput/10.0),1);
+              Serial2.print ("A AC:");
+
+              Serial2.print ((float) (ElconCharger_AmpOutput*ElconCharger_CurrentConst/10.0),0);
+              Serial2.print ("/");
+              if (BMS_State==BMS_Charge && LIM_ACSE_I_Avbl_Grid < 253) Serial2.print (LIM_ACSE_I_Avbl_Grid);
+              else Serial2.print ("0");
+              Serial2.print ("A");
+            }
+          Serial2.write(0x22);
+          Serial2.write(0xff);  // We always have to send this three lines after each command sent to the nextion display.
+          Serial2.write(0xff);
+          Serial2.write(0xff);
+
+          Serial2.print ("charger_time.txt=");
+          Serial2.write(0x22);
+          if (BMS_State==BMS_Charge)
+            {
+              if(ctr_hrs_EOC>0)
+                {
+                  Serial2.print (ctr_hrs_EOC);
+                  Serial2.print ("hrs ");
+                }
+              Serial2.print (ctr_mins_EOC);
+              Serial2.print ("mins to complete");
+            }
+          else
+            {
+              Serial2.print ("");
+            }
+          Serial2.write(0x22);
+          Serial2.write(0xff);  // We always have to send this three lines after each command sent to the nextion display.
+          Serial2.write(0xff);
+          Serial2.write(0xff);
+        }
       DashUpdate_Stamp = millis();
   }
 
@@ -1546,7 +1650,7 @@ void loop() {
   if (Can1.read(msg))
     {
       // if (msg.id==0x272 || msg.id==0x2EF || msg.id==0x2B2 || msg.id==0x29E || msg.id==0x390 || msg.id==0x337 || msg.id==0x3B4) Check_LIM (msg);  
-      if (msg.id==0x3B4) Check_LIM (msg); 
+      if (msg.id==0x2B2 || msg.id==0x29E || msg.id==0x3B4) Check_LIM (msg); 
       if (msg.id==canID_BMSLimits || msg.id==canID_BMSInfo || msg.id==canID_BMSLowHigh || msg.id==canID_BMSSOC || msg.id==canID_BMSStatus || msg.id==canID_BMSWarnings || msg.id==canID_BMSNumbModules) Check_BMS (msg);
       if (msg.id>=0x521 && msg.id<=0x524) Check_ISA (msg);
       if (msg.id==canID_Drive || msg.id==canID_DriveRPM) Check_Drive (msg);
