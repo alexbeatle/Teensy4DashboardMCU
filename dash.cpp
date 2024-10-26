@@ -1709,6 +1709,30 @@ void dashupdate()
           Serial2.write(0xff);
           Serial2.write(0xff);
         }
+      else
+        {
+          Serial2.print ("charger_error.txt=");
+          Serial2.write(0x22);
+          Serial2.print ("");
+          Serial2.write(0x22);
+          Serial2.write(0xff);  // We always have to send this three lines after each command sent to the nextion display.
+          Serial2.write(0xff);
+          Serial2.write(0xff);
+          Serial2.print ("charger_stat.txt=");
+          Serial2.write(0x22);
+          Serial2.print ("");
+          Serial2.write(0x22);
+          Serial2.write(0xff);  // We always have to send this three lines after each command sent to the nextion display.
+          Serial2.write(0xff);
+          Serial2.write(0xff);
+          Serial2.print ("charger_time.txt=");
+          Serial2.write(0x22);
+          Serial2.print ("");
+          Serial2.write(0x22);
+          Serial2.write(0xff);  // We always have to send this three lines after each command sent to the nextion display.
+          Serial2.write(0xff);
+          Serial2.write(0xff);
+        }
       DashUpdate_Stamp = millis();
   }
 
