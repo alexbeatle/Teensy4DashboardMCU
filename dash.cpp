@@ -112,10 +112,12 @@ long BMS_ChargeAmpLim=0;
 long BMS_disChargeVoltLim=0;
 long BMS_disChargeAmpLim=0;
 uint16_t BMS_SOC=0;
+uint8_t soc_temp;
 float BMS_CellsVoltMin=0;
 float BMS_CellsVoltMax=0;
 float BMS_CellsTempMin=0;
 float BMS_CellsTempMax=0;
+float BMS_CellsGap=0;
 uint16_t BMS_CapacityAh=0;
 uint16_t BMS_CapacityWhCharge=0;
 long BMS_PackVolt=0;
@@ -395,6 +397,7 @@ void Set_ZeroBMS (void)
   BMS_CellsVoltMax = 0;
   BMS_CellsTempMin = 0;
   BMS_CellsTempMax = 0;
+  BMS_CellsGap=0;
   BMS_PackVolt=0;
   BMS_AvgTemp=0;
   BMS_BatAmp=0;
@@ -501,6 +504,8 @@ void Check_BMS (CAN_message_t incoming)
         // readingBMS_MaxCellsVolt = readingBMS_MaxCellsVolt/1000;
         if (readingBMS_MaxCellsVolt > 0) BMS_CellsVoltMax=readingBMS_MaxCellsVolt;
         else BMS_CellsVoltMax = 0;
+
+        BMS_CellsGap=(BMS_CellsVoltMax - BMS_CellsVoltMin) / 1.0;
 
         readingBMS_MinCellsTemp = (uint16_t) incoming.buf[5] << 8 | incoming.buf[4];
         readingBMS_MinCellsTemp = readingBMS_MinCellsTemp-273.15;
@@ -793,22 +798,20 @@ void dashupdate()
     Serial2.write(0xff);
     Serial2.write(0xff);
 
-    //error or boot colour = flashing red
+    // error or boot colour = flashing red
     if ((BMS_State==BMS_Error || BMS_State==BMS_Boot) && flash)
       {
         Serial2.print("stat.pco=63488"); //text colour = red
-        Serial2.write(0xff);  // We always have to send this three lines after each command sent to the nextion display.
-        Serial2.write(0xff);
-        Serial2.write(0xff);
       }
     else
       {
         Serial2.print("stat.pco=34815"); // text colour neutral
-        Serial2.write(0xff);  // We always have to send this three lines after each command sent to the nextion display.
-        Serial2.write(0xff);
-        Serial2.write(0xff);
       }
+    Serial2.write(0xff);  // We always have to send this three lines after each command sent to the nextion display.
+    Serial2.write(0xff);
+    Serial2.write(0xff);
 
+    //state
     Serial2.print("stat.txt=");
     Serial2.write(0x22);
     switch (BMS_State)
@@ -1133,31 +1136,90 @@ void dashupdate()
             break;
           }
       }
-      Serial2.print("soc.val=");
-      // Serial2.write(0x22);
+
+      //SOC
+      // Serial2.print("soc1.val=");
+      // Serial2.print(BMS_SOC/10);
+      // Serial2.write(0xff);  // We always have to send this three lines after each command sent to the nextion display.
+      // Serial2.write(0xff);
+      // Serial2.write(0xff);
+      if (soc_temp<(BMS_SOC/10))
+        {
+          soc_temp=(BMS_SOC/10);
+          Serial2.print("soc1.val=");
+          Serial2.print(BMS_SOC/10);
+          Serial2.write(0xff);  // We always have to send this three lines after each command sent to the nextion display.
+          Serial2.write(0xff);
+          Serial2.write(0xff);
+        }
+      Serial2.print("soc.txt=");
+      Serial2.write(0x22);
       Serial2.print(BMS_SOC/10);
-      // Serial2.write(0x22);
+      Serial2.print("%");
+      Serial2.write(0x22);
       Serial2.write(0xff);  // We always have to send this three lines after each command sent to the nextion display.
       Serial2.write(0xff);
       Serial2.write(0xff);
-      //colourcode SOC
+      // colourcode SOC
       if(BMS_SOC<=100) Serial2.print("soc.pco=63488"); //text colour = red
       else if (BMS_SOC>100 && BMS_SOC<=300) Serial2.print("soc.pco=65504"); //text colour = yellow
       else Serial2.print("soc.pco=2016"); //text colour = green
       Serial2.write(0xff);  // We always have to send this three lines after each command sent to the nextion display.
       Serial2.write(0xff);
       Serial2.write(0xff);
-      Serial2.print("soc1.val=");
-      // Serial2.write(0x22);
-      Serial2.print(BMS_SOC/10);
-      // Serial2.write(0x22);
+
+      //main screen stat indicators
+      //colourcode motor alarm
+      if(Drive_MotorTemp<=10000) Serial2.print("m_alarm.pco=0"); //text colour = black/invisible
+      else if (Drive_MotorTemp>10000 && Drive_MotorTemp<=12000) Serial2.print("m_alarm.pco=65504"); //text colour = yellow
+      else Serial2.print("m_alarm.pco=63488"); //text colour = red
       Serial2.write(0xff);  // We always have to send this three lines after each command sent to the nextion display.
       Serial2.write(0xff);
       Serial2.write(0xff);
+      //colourcode HS inverter alarm
+      if(Drive_HtSnkTemp<=6000) Serial2.print("hs_alarm.pco=0"); //text colour = black/invisible
+      else if (Drive_HtSnkTemp>6000 && Drive_HtSnkTemp<=7000) Serial2.print("hs_alarm.pco=65504"); //text colour = yellow
+      else Serial2.print("hs_alarm.pco=63488"); //text colour = red
+      Serial2.write(0xff);  // We always have to send this three lines after each command sent to the nextion display.
+      Serial2.write(0xff);
+      Serial2.write(0xff);
+      //colourcode brake booster alarm
+      if (IBST_driverBrakeApply==BRAKES_NOT_APPLIED || IBST_driverBrakeApply==DRIVER_APPLYING_BRAKES || IBST_iBoosterStatus==IBOOSTER_READY || IBST_iBoosterStatus==IBOOSTER_ACTUATION || IBST_internalState==LOCAL_BRAKE_REQUEST || IBST_internalState==TRANSITION_TO_IDLE)
+        {Serial2.print("brake_alarm.pco=0");} //text colour = black/invisible
+      else {Serial2.print("brake_alarm.pco=63488");} //text colour = red
+      Serial2.write(0xff);  // We always have to send this three lines after each command sent to the nextion display.
+      Serial2.write(0xff);
+      Serial2.write(0xff);      
+      //colourcode battery alarm
+      if (BMS_State==BMS_Error || BMS_State==BMS_Boot)
+        {Serial2.print("b_alarm.pco=63488");} //text colour = red
+      else
+        {
+          if(BMS_AvgTemp<=100 || BMS_CellsTempMin<=10 || BMS_CellsTempMax<=10) Serial2.print("b_alarm.pco=34815"); //text colour = blue=cold
+          else if (BMS_AvgTemp>100 && BMS_AvgTemp<=450 && BMS_CellsTempMin>10 && BMS_CellsTempMin<=45 && BMS_CellsTempMax>10 && BMS_CellsTempMax<=45) Serial2.print("b_alarm.pco=0"); //text colour = black/invisible
+          else Serial2.print("b_alarm.pco=63488"); //text colour = red
+        }
+      Serial2.write(0xff);  // We always have to send this three lines after each command sent to the nextion display.
+      Serial2.write(0xff);
+      Serial2.write(0xff);
+      //colourcode OBC alarm
+      if ((ElconCharger_CommTimeout==0 && ElconCharger_HardwareError==0 && ElconCharger_TempError==0 && ElconCharger_BatVoltError==0 && ElconCharger_InVoltError==0) || BMS_State!=BMS_Charge || LIM_Charger_Type!=0x01 || LIM_Charger_Type!=0x02) 
+        {Serial2.print("obc_alarm.pco=0");} //text colour = black/invisible
+      else {Serial2.print("obc_alarm.pco=63488");} //text colour = red
+      Serial2.write(0xff);  // We always have to send this three lines after each command sent to the nextion display.
+      Serial2.write(0xff);
+      Serial2.write(0xff);
+      //colourcode DCDC alarm
+      if (ElconDCDC_HVILError==0 && ElconDCDC_StopError==0 && ElconDCDC_CommTimeout==0 && ElconDCDC_HardwareError==0 && ElconDCDC_Ready==1 && ElconDCDC_OutOverAmp==0 && ElconDCDC_InOverVolt==0 && ElconDCDC_OutUnderVolt==0 && ElconDCDC_OutOverVolt==0 && ElconDCDC_OverTemp==0 && ElconDCDC_HighTemp==0) 
+        {Serial2.print("dcdc_alarm.pco=0");} //text colour = black/invisible
+      else {Serial2.print("dcdc_alarm.pco=63488");} //text colour = red
+      Serial2.write(0xff);  // We always have to send this three lines after each command sent to the nextion display.
+      Serial2.write(0xff);
+      Serial2.write(0xff);
+
+      //current
       Serial2.print("current.txt=");
       Serial2.write(0x22);
-      // if (BMS_BatAmp<=0x7fff) Serial2.print((float)((BMS_BatAmp)/10.0),2);
-      // else Serial2.print((float)((BMS_BatAmp)/(-10.0)),2);
       Serial2.print((float) ((8192-ISA_BatAmp)/10.0f),2);
       Serial2.write(0x22);
       Serial2.write(0xff);  // We always have to send this three lines after each command sent to the nextion display.
@@ -1170,6 +1232,7 @@ void dashupdate()
       Serial2.write(0xff);  // We always have to send this three lines after each command sent to the nextion display.
       Serial2.write(0xff);
       Serial2.write(0xff);
+
       //colourcode bat temp
       if(BMS_AvgTemp<=100) Serial2.print("b_temp.pco=34815"); //text colour = blue=cold
       else if (BMS_AvgTemp>100 && BMS_AvgTemp<=450) Serial2.print("b_temp.pco=2016"); //text colour = green
@@ -1184,9 +1247,10 @@ void dashupdate()
       Serial2.write(0xff);  // We always have to send this three lines after each command sent to the nextion display.
       Serial2.write(0xff);
       Serial2.write(0xff);
+
       //colourcode motor temp
-      if(Drive_MotorTemp<=6000) Serial2.print("m_temp.pco=2016"); //text colour = green
-      else if (Drive_MotorTemp>6000 && Drive_MotorTemp<=7000) Serial2.print("m_temp.pco=65504"); //text colour = yellow
+      if(Drive_MotorTemp<=10000) Serial2.print("m_temp.pco=2016"); //text colour = green
+      else if (Drive_MotorTemp>10000 && Drive_MotorTemp<=12000) Serial2.print("m_temp.pco=65504"); //text colour = yellow
       else Serial2.print("m_temp.pco=63488"); //text colour = red
       Serial2.write(0xff);  // We always have to send this three lines after each command sent to the nextion display.
       Serial2.write(0xff);
@@ -1198,9 +1262,10 @@ void dashupdate()
       Serial2.write(0xff);  // We always have to send this three lines after each command sent to the nextion display.
       Serial2.write(0xff);
       Serial2.write(0xff);
-      //colourcode HS temp
-      if(Drive_HtSnkTemp<=10000) Serial2.print("hs_temp.pco=2016"); //text colour = green
-      else if (Drive_HtSnkTemp>10000 && Drive_HtSnkTemp<=12000) Serial2.print("hs_temp.pco=65504"); //text colour = yellow
+
+      //colourcode HS inverter temp
+      if(Drive_HtSnkTemp<=6000) Serial2.print("hs_temp.pco=2016"); //text colour = green
+      else if (Drive_HtSnkTemp>6000 && Drive_HtSnkTemp<=7000) Serial2.print("hs_temp.pco=65504"); //text colour = yellow
       else Serial2.print("hs_temp.pco=63488"); //text colour = red
       Serial2.write(0xff);  // We always have to send this three lines after each command sent to the nextion display.
       Serial2.write(0xff);
@@ -1212,6 +1277,7 @@ void dashupdate()
       Serial2.write(0xff);  // We always have to send this three lines after each command sent to the nextion display.
       Serial2.write(0xff);
       Serial2.write(0xff);
+
       //colourcode bat temp low
       if(BMS_CellsTempMin<=10) Serial2.print("b_temp_low.pco=34815"); //text colour = blue=cold
       else if (BMS_CellsTempMin>10 && BMS_CellsTempMin<=45) Serial2.print("b_temp_low.pco=2016"); //text colour = green
@@ -1226,6 +1292,7 @@ void dashupdate()
       Serial2.write(0xff);  // We always have to send this three lines after each command sent to the nextion display.
       Serial2.write(0xff);
       Serial2.write(0xff);
+
       //colourcode bat temp high
       if(BMS_CellsTempMax<=10) Serial2.print("b_temp_high.pco=34815"); //text colour = blue=cold
       else if (BMS_CellsTempMax>10 && BMS_CellsTempMax<=45) Serial2.print("b_temp_high.pco=2016"); //text colour = green
@@ -1233,6 +1300,8 @@ void dashupdate()
       Serial2.write(0xff);  // We always have to send this three lines after each command sent to the nextion display.
       Serial2.write(0xff);
       Serial2.write(0xff);
+
+      //pack volt
       Serial2.print("volt.txt=");
       Serial2.write(0x22);
       Serial2.print(BMS_PackVolt/100);
@@ -1240,6 +1309,8 @@ void dashupdate()
       Serial2.write(0xff);  // We always have to send this three lines after each command sent to the nextion display.
       Serial2.write(0xff);
       Serial2.write(0xff);
+
+      //lowest cell volts
       Serial2.print("v_lowcell.txt=");
       Serial2.write(0x22);
       Serial2.print((float)(BMS_CellsVoltMin/1000.0),2);// * 1000);
@@ -1247,6 +1318,8 @@ void dashupdate()
       Serial2.write(0xff);  // We always have to send this three lines after each command sent to the nextion display.
       Serial2.write(0xff);
       Serial2.write(0xff);
+
+      //highest cell volts
       Serial2.print("v_highcell.txt=");
       Serial2.write(0x22);
       Serial2.print((float)(BMS_CellsVoltMax/1000.0),2);// * 1000);
@@ -1254,18 +1327,22 @@ void dashupdate()
       Serial2.write(0xff);  // We always have to send this three lines after each command sent to the nextion display.
       Serial2.write(0xff);
       Serial2.write(0xff);
-      // // Serial2.print("firm.txt=");
-      // // Serial2.print(firmver);
-      // // Serial2.write(0xff);  // We always have to send this three lines after each command sent to the nextion display.
-      // // Serial2.write(0xff);
-      // // Serial2.write(0xff);
+
+      //cells gap
       Serial2.print("volt_delta.txt=");
       Serial2.write(0x22);
-      Serial2.print((float) ((BMS_CellsVoltMax - BMS_CellsVoltMin) / 1.0),0);
+      Serial2.print(BMS_CellsGap,0);
       Serial2.write(0x22);
       Serial2.write(0xff);  // We always have to send this three lines after each command sent to the nextion display.
       Serial2.write(0xff);
       Serial2.write(0xff);
+      if (BMS_CellsGap>=2000) {Serial2.print("volt_delta.pco=63488");} //text colour = red
+      else {Serial2.print("volt_delta.pco=2016");} //text colour = green
+      Serial2.write(0xff);  // We always have to send this three lines after each command sent to the nextion display.
+      Serial2.write(0xff);
+      Serial2.write(0xff);
+
+      //cells balancing
       Serial2.print("cellbal.txt=");
       Serial2.write(0x22);
       Serial2.print(BMS_CellsBal);
@@ -1273,6 +1350,22 @@ void dashupdate()
       Serial2.write(0xff);  // We always have to send this three lines after each command sent to the nextion display.
       Serial2.write(0xff);
       Serial2.write(0xff);
+
+      //number of modules detected
+      Serial2.print ("numbModules.txt=");
+      Serial2.write(0x22);
+      Serial2.print(BMS_NumbModules);
+      Serial2.write(0x22);
+      Serial2.write(0xff);  // We always have to send this three lines after each command sent to the nextion display.
+      Serial2.write(0xff);
+      Serial2.write(0xff);
+      if (BMS_NumbModules!=14) {Serial2.print("numbModules.pco=63488");} //text colour = red
+      else {Serial2.print("numbModules.pco=2016");} //text colour = green
+      Serial2.write(0xff);  // We always have to send this three lines after each command sent to the nextion display.
+      Serial2.write(0xff);
+      Serial2.write(0xff);
+
+      //rpm
       Serial2.print("rpm.txt=");
       Serial2.write(0x22);
       Serial2.print(Drive_RPM);
@@ -1280,6 +1373,7 @@ void dashupdate()
       Serial2.write(0xff);  // We always have to send this three lines after each command sent to the nextion display.
       Serial2.write(0xff);
       Serial2.write(0xff);
+      //mph
       Serial2.print("mph.txt=");
       Serial2.write(0x22);
       Serial2.print((uint16_t) (Drive_RPM/120.24));
@@ -1287,6 +1381,7 @@ void dashupdate()
       Serial2.write(0xff);  // We always have to send this three lines after each command sent to the nextion display.
       Serial2.write(0xff);
       Serial2.write(0xff);
+      //km/h
       Serial2.print("kmph.txt=");
       Serial2.write(0x22);
       Serial2.print((uint16_t) (Drive_RPM/74.68));
@@ -1294,6 +1389,8 @@ void dashupdate()
       Serial2.write(0xff);  // We always have to send this three lines after each command sent to the nextion display.
       Serial2.write(0xff);
       Serial2.write(0xff);
+
+      //drive info
       Serial2.print ("m_opmode.txt=");
       Serial2.write(0x22);
       switch (Drive_OpMode)
@@ -1348,26 +1445,7 @@ void dashupdate()
       Serial2.write(0xff);  // We always have to send this three lines after each command sent to the nextion display.
       Serial2.write(0xff);
       Serial2.write(0xff);
-      // strTemp = String(""); //clear message
-      // if (Drive_Status == Drive_Stat_None)      strTemp+=strDriveStatNone;
-      // if ((Drive_Status>>0 & 0x1) == 1)         strTemp+=strDriveStatVdcLow;  
-      // if ((Drive_Status>>1 & 0x1) == 1)         strTemp+=strDriveStatVdcHigh;
-      // if ((Drive_Status>>2 & 0x1) == 1)         strTemp+=strDriveStatVdcBelowVdcSw;  
-      // if ((Drive_Status>>3 & 0x1) == 1)         strTemp+=strDriveStatVdcLim;
-      // if ((Drive_Status>>4 & 0x1) == 1)         strTemp+=strDriveStatEStop;  
-      // if ((Drive_Status>>5 & 0x1) == 1)         strTemp+=strDriveStatMProt;
-      // if ((Drive_Status>>6 & 0x1) == 1)         strTemp+=strDriveStatPotPressed;  
-      // if ((Drive_Status>>7 & 0x1) == 1)         strTemp+=strDriveStatTmpHs;
-      // if ((Drive_Status>>8 & 0x1) == 1)         strTemp+=strDriveStatWaitStart;  
-      // if ((Drive_Status>>9 & 0x1) == 1)         strTemp+=strDriveStatBrakeCheck;
-      // if (Drive_Status == Drive_Stat_Invalid)         strTemp+=strDriveStatInvalid;  
-      // Serial2.print ("m_stat.txt=");
-      // Serial2.write(0x22);
-      // Serial2.print(strTemp);
-      // Serial2.write(0x22);
-      // Serial2.write(0xff);  // We always have to send this three lines after each command sent to the nextion display.
-      // Serial2.write(0xff);
-      // Serial2.write(0xff);
+
       Serial2.print ("m_stat.txt=");
       Serial2.write(0x22);
       if (Drive_Status == Drive_Stat_None)      Serial2.print (strDriveStatNone);
@@ -1386,6 +1464,8 @@ void dashupdate()
       Serial2.write(0xff);  // We always have to send this three lines after each command sent to the nextion display.
       Serial2.write(0xff);
       Serial2.write(0xff);
+
+      //ibooster info
       Serial2.print ("ib_brk_app.txt=");
       Serial2.write(0x22);
       if (IBST_driverBrakeApply==BRAKES_NOT_APPLIED)      Serial2.print ("BRAKES_NOT_APPLIED");
@@ -1434,13 +1514,8 @@ void dashupdate()
       Serial2.write(0xff);  // We always have to send this three lines after each command sent to the nextion display.
       Serial2.write(0xff);
       Serial2.write(0xff);
-      Serial2.print ("numbModules.txt=");
-      Serial2.write(0x22);
-      Serial2.print(BMS_NumbModules);
-      Serial2.write(0x22);
-      Serial2.write(0xff);  // We always have to send this three lines after each command sent to the nextion display.
-      Serial2.write(0xff);
-      Serial2.write(0xff);
+
+      //DCDC info
       Serial2.print ("dcdc_error.txt=");
       Serial2.write(0x22);
       if (ElconDCDC_msgInvalid)
@@ -1491,11 +1566,12 @@ void dashupdate()
       Serial2.write(0xff);
       Serial2.write(0xff);
 
+      // Charging info
       if (LIM_Charger_Type==0x04 || LIM_Charger_Type==0x08 || LIM_Charger_Type==0x09) //DC Charging info
         {
           Serial2.print ("charger_error.txt=");
           Serial2.write(0x22);
-          Serial2.print ("TBD");
+          Serial2.print ("TBA");
           // if (ElconCharger_msgInvalid)
           //   {
           //     Serial2.print ("Invalid CAN message");
@@ -1525,7 +1601,7 @@ void dashupdate()
           Serial2.print ("V ");
           Serial2.print ((float) (LIM_DCSE_I_Current/10.0),1);
           Serial2.print (" / ");
-          if (BMS_State==BMS_Charge && LIM_DCSE_I_Avbl < 2550) Serial2.print ((float) (LIM_DCSE_I_Avbl/10.0),1);
+          if (BMS_State==BMS_Charge && LIM_DCSE_I_Avbl <= 2550) Serial2.print ((float) (LIM_DCSE_I_Avbl/10.0),1);
           else Serial2.print ("0");
           Serial2.print ("A");
           Serial2.write(0x22);
@@ -1562,7 +1638,7 @@ void dashupdate()
           Serial2.write(0xff);
           Serial2.write(0xff);
         }
-      else //AC Charging info
+      else if (LIM_Charger_Type==0x01 || LIM_Charger_Type==0x02) //DC Charging info //AC Charging info
         {
           Serial2.print ("charger_error.txt=");
           Serial2.write(0x22);
