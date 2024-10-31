@@ -234,7 +234,7 @@ void setup()
 
     //Zero all CAN message values
     Set_ZeroLIM();
-    // Set_ZeroISA();
+    Set_ZeroISA();
     Set_ZeroBMS();
     Set_ZeroDrive();
     Set_ZeroElcon();
@@ -1220,7 +1220,7 @@ void dashupdate()
       //current
       Serial2.print("current.txt=");
       Serial2.write(0x22);
-      Serial2.print((float) ((8192-ISA_BatAmp)/10.0f),2);
+      Serial2.print((float) ((8192-ISA_BatAmp)/-10.0f),1);
       Serial2.write(0x22);
       Serial2.write(0xff);  // We always have to send this three lines after each command sent to the nextion display.
       Serial2.write(0xff);
@@ -1601,8 +1601,9 @@ void dashupdate()
           Serial2.print ("V ");
           Serial2.print ((float) (LIM_DCSE_I_Current/10.0),1);
           Serial2.print (" / ");
-          if (BMS_State==BMS_Charge && LIM_DCSE_I_Avbl <= 2550) Serial2.print ((float) (LIM_DCSE_I_Avbl/10.0),1);
-          else Serial2.print ("0");
+          // if (BMS_State==BMS_Charge && LIM_DCSE_I_Avbl <= 2550) Serial2.print ((float) (LIM_DCSE_I_Avbl/10.0),1);
+          // else Serial2.print ("0");
+          Serial2.print ((float) ((500-LIM_DCSE_I_Avbl)/10.0),1);
           Serial2.print ("A");
           Serial2.write(0x22);
           Serial2.write(0xff);  // We always have to send this three lines after each command sent to the nextion display.
